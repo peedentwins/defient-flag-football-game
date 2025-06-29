@@ -24,37 +24,23 @@
   #message {
     margin-top: 10px; font-weight: bold; font-size: 20px; color: yellow;
   }
-  #joystick {
+  #joystick-base, #joystick-stick {
     position: absolute;
-    bottom: 0; left: 0;
-    width: 100vw;
-    height: 50vh;
-    z-index: 20;
-    pointer-events: none; /* disable pointer events on container */
+    border-radius: 50%;
+    touch-action: none;
+    display: none; /* initially hidden */
+    user-select: none;
   }
   #joystick-base {
-    position: absolute;
-    bottom: 20px; left: 20px;
     width: 150px; height: 150px;
     background: rgba(255,255,255,0.2);
-    border-radius: 50%;
-    touch-action: none;
-    pointer-events: auto; /* enable pointer events here */
+    z-index: 20;
   }
   #joystick-stick {
-    position: absolute;
-    bottom: 95px; left: 95px;
     width: 60px; height: 60px;
     background: rgba(255,255,255,0.4);
-    border-radius: 50%;
-    touch-action: none;
+    z-index: 21;
     transition: 0.1s ease-out;
-    pointer-events: auto; /* enable pointer events here */
-  }
-  @media(min-width: 768px) {
-    #joystick {
-      display: none;
-    }
   }
 </style>
 </head>
@@ -66,10 +52,8 @@
     <div id="message"></div>
   </div>
 
-  <div id="joystick">
-    <div id="joystick-base"></div>
-    <div id="joystick-stick"></div>
-  </div>
+  <div id="joystick-base"></div>
+  <div id="joystick-stick"></div>
 
 <script>
 (() => {
@@ -104,46 +88,75 @@
   let joystickDeltaY = 0;
   const maxDistance = 50;
 
-  // Joystick handlers
-  function joystickStart(event) {
-    joystickActive = true;
-    const touch = event.targetTouches ? event.targetTouches[0] : event;
-    joystickStartX = touch.clientX;
-    joystickStartY = touch.clientY;
-    joystickStick.style.transition = '0s';
-    moveStick(0,0);
-    // preventDefault only on touchstart for touch devices to avoid scrolling
-    if(event.type.startsWith('touch')) event.preventDefault();
+  // Detect touch support to toggle joystick visibility
+  const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  if (isTouchDevice) {
+    joystickBase.style.display = 'block';
+    joystickStick.style.display = 'block';
+  } else {
+    joystickBase.style.display = 'none';
+    joystickStick.style.display = 'none';
   }
-  function joystickMove(event) {
-    if (!joystickActive) return;
-    const touch = event.targetTouches ? event.targetTouches[0] : event;
-    joystickDeltaX = touch.clientX - joystickStartX;
-    joystickDeltaY = touch.clientY - joystickStartY;
 
-    // Limit joystick stick movement
-    const distance = Math.sqrt(joystickDeltaX * joystickDeltaX + joystickDeltaY * joystickDeltaY);
-    if(distance > maxDistance) {
-      const angle = Math.atan2(joystickDeltaY, joystickDeltaX);
-      joystickDeltaX = Math.cos(angle) * maxDistance;
-      joystickDeltaY = Math.sin(angle) * maxDistance;
-    }
-    moveStick(joystickDeltaX, joystickDeltaY);
-    if(event.type.startsWith('touch')) event.preventDefault();
+  function setJoystickPosition(x, y) {
+    joystickBase.style.left = (x - 75) + 'px'; // base width / 2
+    joystickBase.style.top = (y - 75) + 'px';
+    joystickStick.style.left = (x - 30) + 'px'; // stick width / 2
+    joystickStick.style.top = (y - 30) + 'px';
   }
-  function joystickEnd(event) {
-    joystickActive = false;
-    joystickDeltaX = 0;
-    joystickDeltaY = 0;
-    joystickStick.style.transition = '0.2s ease-out';
-    moveStick(0,0);
-    if(event.type.startsWith('touch')) event.preventDefault();
-  }
+
   function moveStick(x, y) {
     joystickStick.style.transform = `translate(${x}px, ${y}px)`;
   }
 
-  // Convert joystickDeltaX/Y to keys
+  function joystickStart(event) {
+    if (event.targetTouches && event.targetTouches.length > 0) {
+      const touch = event.targetTouches[0];
+      // Only activate joystick if touch is on bottom half
+      if (touch.clientY < window.innerHeight / 2) return;
+      event.preventDefault();
+      joystickActive = true;
+      joystickStartX = touch.clientX;
+      joystickStartY = touch.clientY;
+      joystickDeltaX = 0;
+      joystickDeltaY = 0;
+      joystickStick.style.transition = '0s';
+      setJoystickPosition(joystickStartX, joystickStartY);
+      moveStick(0, 0);
+    }
+  }
+
+  function joystickMove(event) {
+    if (!joystickActive) return;
+    if (event.targetTouches && event.targetTouches.length > 0) {
+      event.preventDefault();
+      const touch = event.targetTouches[0];
+      joystickDeltaX = touch.clientX - joystickStartX;
+      joystickDeltaY = touch.clientY - joystickStartY;
+
+      // Limit joystick stick movement to maxDistance radius
+      const distance = Math.sqrt(joystickDeltaX * joystickDeltaX + joystickDeltaY * joystickDeltaY);
+      if (distance > maxDistance) {
+        const angle = Math.atan2(joystickDeltaY, joystickDeltaX);
+        joystickDeltaX = Math.cos(angle) * maxDistance;
+        joystickDeltaY = Math.sin(angle) * maxDistance;
+      }
+      moveStick(joystickDeltaX, joystickDeltaY);
+    }
+  }
+
+  function joystickEnd(event) {
+    if (!joystickActive) return;
+    event.preventDefault();
+    joystickActive = false;
+    joystickDeltaX = 0;
+    joystickDeltaY = 0;
+    joystickStick.style.transition = '0.2s ease-out';
+    moveStick(0, 0);
+    joystickBase.style.display = 'none';
+    joystickStick.style.display = 'none';
+  }
+
   function updateJoystickKeys() {
     keys["ArrowUp"] = false;
     keys["ArrowDown"] = false;
@@ -151,26 +164,28 @@
     keys["ArrowRight"] = false;
 
     const threshold = 10;
-    if(joystickDeltaY < -threshold) keys["ArrowUp"] = true;
-    if(joystickDeltaY > threshold) keys["ArrowDown"] = true;
-    if(joystickDeltaX < -threshold) keys["ArrowLeft"] = true;
-    if(joystickDeltaX > threshold) keys["ArrowRight"] = true;
+
+    if (joystickDeltaY < -threshold) keys["ArrowUp"] = true;
+    if (joystickDeltaY > threshold) keys["ArrowDown"] = true;
+    if (joystickDeltaX < -threshold) keys["ArrowLeft"] = true;
+    if (joystickDeltaX > threshold) keys["ArrowRight"] = true;
   }
 
-  joystickBase.addEventListener('touchstart', joystickStart, {passive:false});
-  joystickBase.addEventListener('touchmove', joystickMove, {passive:false});
-  joystickBase.addEventListener('touchend', joystickEnd, {passive:false});
-  joystickBase.addEventListener('touchcancel', joystickEnd, {passive:false});
-
-  joystickStick.addEventListener('touchstart', joystickStart, {passive:false});
-  joystickStick.addEventListener('touchmove', joystickMove, {passive:false});
-  joystickStick.addEventListener('touchend', joystickEnd, {passive:false});
-  joystickStick.addEventListener('touchcancel', joystickEnd, {passive:false});
+  // Attach touch listeners to whole window to detect joystick usage on bottom half
+  window.addEventListener('touchstart', joystickStart, { passive: false });
+  window.addEventListener('touchmove', joystickMove, { passive: false });
+  window.addEventListener('touchend', joystickEnd, { passive: false });
+  window.addEventListener('touchcancel', joystickEnd, { passive: false });
 
   window.addEventListener('resize', () => {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
     setupPlayers();
+    // If touch device, show joystick after resize
+    if (isTouchDevice && !joystickActive) {
+      joystickBase.style.display = 'block';
+      joystickStick.style.display = 'block';
+    }
   });
 
   function randomInt(min,max) {
@@ -247,7 +262,7 @@
       ctx.fillRect(p.x, p.y + PLAYER_SIZE/2, PLAYER_SIZE, PLAYER_SIZE/2);
       if(p.hasBall) {
         ctx.fillStyle = OFFENSE_FLAG_COLOR;
-        ctx.fillRect(p.x + PLAYER_SIZE - 8, p.y + PLAYER_SIZE / 3, 6, 10);
+        ctx.fillRect(p.x + PLAYER_SIZE - 8, p.y + PLAYER_SIZE/3, 6, 10);
         ctx.fillStyle = "#654321";
         ctx.beginPath();
         ctx.arc(p.x + PLAYER_SIZE / 2, p.y + PLAYER_SIZE / 2, 6, 0, Math.PI * 2);
@@ -380,14 +395,8 @@
 
   document.getElementById("startBtn").onclick = startGame;
   document.getElementById("nextLevelBtn").onclick = nextLevel;
-
-  // Keyboard input works on all devices, no interference from joystick overlay
-  window.addEventListener("keydown", e => {
-    keys[e.key] = true;
-  });
-  window.addEventListener("keyup", e => {
-    keys[e.key] = false;
-  });
+  window.addEventListener("keydown", e => keys[e.key] = true);
+  window.addEventListener("keyup", e => keys[e.key] = false);
 
   function gameLoop() {
     ctx.clearRect(0,0,canvas.width,canvas.height);
