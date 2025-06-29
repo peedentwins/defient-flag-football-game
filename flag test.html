@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Defient Flag Football - Core Gameplay</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; overflow: hidden; background: #000;
+    font-family: Arial, sans-serif;
+  }
+  #gameCanvas {
+    display: block;
+    background-color: #228B22;
+  }
+  #ui {
+    position: absolute;
+    top: 10px; width: 100%; text-align: center; color: white; z-index: 10;
+  }
+  button {
+    font-size: 16px; padding: 10px 15px; margin: 0 5px;
+  }
+  #message {
+    margin-top: 10px; font-weight: bold; font-size: 20px; color: yellow;
+  }
+  /* Joystick container */
+  #joystickContainer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 50vh;
+    background: rgba(255,255,255,0.05);
+    touch-action: none;
+    z-index: 20;
+    display: none; /* hidden by default */
+  }
+  /* Joystick base */
+  #joystickBase {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 150px;
+    height: 150px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 50%;
+    border: 2px solid white;
+  }
+  /* Joystick stick */
+  #joystickStick {
+    position: absolute;
+    bottom: 95px; /* center within base */
+    left: 50%;
+    transform: translateX(-50%);
+    width: 70px;
+    height: 70px;
+    background: rgba(255, 255, 255, 0.4);
+    border-radius: 50%;
+    border: 2px solid white;
+    touch-action: none;
+  }
+  /* Show joystick only on touch devices */
+  @media (hover: none) and (pointer: coarse) {
+    #joystickContainer {
+      display: block;
+    }
+  }
+</style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <div id="ui">
+    <button id="startBtn">Start Level 1</button>
+    <button id="nextLevelBtn" style="display:none;">Next Level</button>
+    <div id="message"></div>
+  </div>
+
+  <!-- Joystick container -->
+  <div id="joystickContainer" aria-label="Joystick control for mobile" role="application" aria-live="polite">
+    <div id="joystickBase"></div>
+    <div id="joystickStick"></div>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById("gameCanvas");
+  const ctx = canvas.getContext("2d");
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  const PLAYER_SIZE = 30;
+  const DEFENDER_SIZE = 30;
+  const TOUCHDOWN_WIDTH = 120;
+  const OFFENSE_COLOR = "#ffd700";
+  const OFFENSE_FLAG_COLOR = "#309df6";
+  const DEFENSE_COLOR = "#cc0000";
+
+  let level = 1;
+  let defientTokens = 0;
+  let gameState = "idle";
+
+  let offensivePlayers = [];
+  let defensivePlayers = [];
+  let ballCarrierIndex = null;
+  let keys = {};
+
+  // Joystick variables
+  const joystickContainer = document.getElementById("joystickContainer");
+  const joystickStick = document.getElementById("joystickStick");
+  const joystickBase = document.getElementById("joystickBase");
+
+  const joystickRadius = 75; // half of joystickBase width/height
+  const stickRadius = 35; // half of joystickStick width/height
+  let dragging = false;
+  let startX = 0;
+  let startY = 0;
+
+  function randomInt(min,max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+
+  function setupPlayers() {
+    offensivePlayers = [];
+    defensivePlayers = [];
+    ballCarrierIndex = null;
+
+    const spacingOffense = canvas.height / 5;
+    for (let i = 0; i < 4; i++) {
+      offensivePlayers.push({
+        x: 100,
+        y: spacingOffense * (i + 1) - PLAYER_SIZE / 2,
+        hasBall: false
+      });
+    }
+
+    const formation = [
+      {x: canvas.width - 200, y: canvas.height / 4},
+      {x: canvas.width - 200, y: canvas.height / 2},
+      {x: canvas.width - 200, y: (canvas.height * 3) / 4},
+      {x: canvas.width - 300, y: canvas.height / 2}
+    ];
+    defensivePlayers = formation.map(pos => ({...pos}));
+
+    ballCarrierIndex = randomInt(0,3);
+    offensivePlayers[ballCarrierIndex].hasBall = true;
+  }
+
+  function drawField() {
+    ctx.fillStyle = "#228B22";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = "#006400";
+    ctx.fillRect(0,0,TOUCHDOWN_WIDTH,canvas.height);
+    ctx.fillRect(canvas.width - TOUCHDOWN_WIDTH,0,TOUCHDOWN_WIDTH,canvas.height);
+
+    // Midline
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(canvas.width / 2, 0);
+    ctx.lineTo(canvas.width / 2, canvas.height);
+    ctx.stroke();
+
+    ctx.fillStyle = "white";
+    ctx.font = "bold 20px Arial";
+
+    // Left Touchdown
+    ctx.save();
+    ctx.translate(TOUCHDOWN_WIDTH / 2, canvas.height / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = "center";
+    ctx.fillText("Defient Sports Championship League", 0, 0);
+    ctx.restore();
+
+    // Right Touchdown
+    ctx.save();
+    ctx.translate(canvas.width - TOUCHDOWN_WIDTH / 2, canvas.height / 2);
+    ctx.rotate(Math.PI / 2);
+    ctx.textAlign = "center";
+    ctx.fillText("Defient Sports Championship League", 0, 0);
+    ctx.restore();
+  }
+
+  function drawPlayers() {
+    for (let i = 0; i < offensivePlayers.length; i++) {
+      const p = offensivePlayers[i];
+      ctx.fillStyle = OFFENSE_COLOR;
+      ctx.fillRect(p.x, p.y, PLAYER_SIZE, PLAYER_SIZE);
+      ctx.fillStyle = "black";
+      ctx.fillRect(p.x, p.y + PLAYER_SIZE/2, PLAYER_SIZE, PLAYER_SIZE/2);
+      if(p.hasBall) {
+        ctx.fillStyle = OFFENSE_FLAG_COLOR;
+        ctx.fillRect(p.x + PLAYER_SIZE - 8, p.y + PLAYER_SIZE/3, 6, 10);
+        ctx.fillStyle = "#654321";
+        ctx.beginPath();
+        ctx.arc(p.x + PLAYER_SIZE / 2, p.y + PLAYER_SIZE / 2, 6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    for (const d of defensivePlayers) {
+      ctx.fillStyle = DEFENSE_COLOR;
+      ctx.fillRect(d.x, d.y, DEFENDER_SIZE, DEFENDER_SIZE);
+      ctx.fillStyle = "black";
+      ctx.fillRect(d.x, d.y + DEFENDER_SIZE/2, DEFENDER_SIZE, DEFENDER_SIZE/2);
+    }
+  }
+
+  function movePlayer() {
+    const p = offensivePlayers[ballCarrierIndex];
+    if(keys["ArrowUp"]) p.y = Math.max(0, p.y - 4);
+    if(keys["ArrowDown"]) p.y = Math.min(canvas.height - PLAYER_SIZE, p.y + 4);
+    if(keys["ArrowLeft"]) p.x = Math.max(0, p.x - 4);
+    if(keys["ArrowRight"]) p.x = Math.min(canvas.width - PLAYER_SIZE, p.x + 6);
+  }
+
+  function updateDefenders() {
+    const p = offensivePlayers[ballCarrierIndex];
+    defensivePlayers.forEach(d => {
+      const dx = p.x - d.x;
+      const dy = p.y - d.y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if(dist > 1) {
+        const speed = 2 + level * 0.2;
+        d.x += (dx / dist) * speed;
+        d.y += (dy / dist) * speed;
+      }
+    });
+  }
+
+  function checkCollisions() {
+    const p = offensivePlayers[ballCarrierIndex];
+    for(const d of defensivePlayers) {
+      if(
+        p.x < d.x + DEFENDER_SIZE &&
+        p.x + PLAYER_SIZE > d.x &&
+        p.y < d.y + DEFENDER_SIZE &&
+        p.y + PLAYER_SIZE > d.y
+      ) {
+        gameState = "ended";
+        document.getElementById("message").textContent = "Flag Pulled!";
+        updateStartButtonText();
+        return;
+      }
+    }
+    if(p.x + PLAYER_SIZE >= canvas.width - TOUCHDOWN_WIDTH) {
+      gameState = "ended";
+      defientTokens++;
+      document.getElementById("message").textContent = `Touchdown! Tokens: ${defientTokens}`;
+      document.getElementById("nextLevelBtn").style.display = "inline-block";
+      updateStartButtonText();
+    }
+  }
+
+  function drawUI() {
+    ctx.fillStyle = "white";
+    ctx.font = "18px Arial";
+    ctx.fillText(`Level: ${level}`, 10, 25);
+    ctx.fillText(`Defient Tokens: ${defientTokens}`, 10, 50);
+  }
+
+  function updateStartButtonText() {
+    const startBtn = document.getElementById("startBtn");
+    if(gameState === "ended") {
+      if(document.getElementById("message").textContent === "Flag Pulled!") {
+        if(level === 1 || defientTokens > 0) {
+          startBtn.textContent = `Retry Level ${level}`;
+        } else {
+          startBtn.textContent = "No Tokens - Return to Level 1";
+        }
+      } else if(document.getElementById("message").textContent.startsWith("Touchdown")) {
+        startBtn.textContent = `Start Level ${level + 1}`;
+      }
+    } else {
+      startBtn.textContent = `Start Level ${level}`;
+    }
+  }
+
+  function startGame() {
+    if(gameState === "ended" && document.getElementById("message").textContent === "Flag Pulled!") {
+      if(level === 1) {
+        setupPlayers();
+        gameState = "running";
+        document.getElementById("message").textContent = "";
+        document.getElementById("nextLevelBtn").style.display = "none";
+      } else if(defientTokens > 0) {
+        defientTokens--;
+        setupPlayers();
+        gameState = "running";
+        document.getElementById("message").textContent = "";
+        document.getElementById("nextLevelBtn").style.display = "none";
+      } else {
+        level = 1;
+        defientTokens = 0;
+        document.getElementById("message").textContent = "No defient tokens left! Returning to Level 1.";
+        startBtn.textContent = "Start Level 1";
+        setupPlayers();
+        gameState = "running";
+        document.getElementById("nextLevelBtn").style.display = "none";
+      }
+    } else if(gameState === "ended" && document.getElementById("message").textContent.startsWith("Touchdown")) {
+      level++;
+      setupPlayers();
+      gameState = "running";
+      document.getElementById("message").textContent = "";
+      document.getElementById("nextLevelBtn").style.display = "none";
+    } else {
+      setupPlayers();
+      gameState = "running";
+      document.getElementById("message").textContent = "";
+      document.getElementById("nextLevelBtn").style.display = "none";
+    }
+    updateStartButtonText();
+  }
+
+  function nextLevel() {
+    level++;
+    setupPlayers();
+    gameState = "running";
+    document.getElementById("message").textContent = "";
+    document.getElementById("nextLevelBtn").style.display = "none";
+    updateStartButtonText();
+  }
+
+  // Keyboard controls
+  window.addEventListener("keydown", e => keys[e.key] = true);
+  window.addEventListener("keyup", e => keys[e.key] = false);
+
+  // Joystick touch controls
+  joystickStick.addEventListener("touchstart", startDrag, {passive:false});
+  joystickStick.addEventListener("touchmove", dragMove, {passive:false});
+  joystickStick.addEventListener("touchend", endDrag, {passive:false});
+  joystickStick.addEventListener("touchcancel", endDrag, {passive:false});
+
+  function startDrag(e) {
+    e.preventDefault();
+    dragging = true;
+    const touch = e.targetTouches[0];
+    const rect = joystickBase.getBoundingClientRect();
+    startX = rect.left + joystickRadius;
+    startY = rect.top + joystickRadius;
+  }
+
+  function dragMove(e) {
+    if (!dragging) return;
+    e.preventDefault();
+    const touch = e.targetTouches[0];
+    let dx = touch.clientX - startX;
+    let dy = touch.clientY - startY;
+
+    // limit stick movement to joystick radius
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    if (dist > joystickRadius) {
+      dx = dx * joystickRadius / dist;
+      dy = dy * joystickRadius / dist;
+    }
+
+    joystickStick.style.transform = `translate(${dx}px, ${dy}px)`;
+
+    // Clear all keys first
+    keys["ArrowUp"] = false;
+    keys["ArrowDown"] = false;
+    keys["ArrowLeft"] = false;
+    keys["ArrowRight"] = false;
+
+    // Set keys based on joystick direction with deadzone ~15px
+    const deadzone = 15;
+    if(dy < -deadzone) keys["ArrowUp"] = true;
+    else if(dy > deadzone) keys["ArrowDown"] = true;
+    if(dx < -deadzone) keys["ArrowLeft"] = true;
+    else if(dx > deadzone) keys["ArrowRight"] = true;
+  }
+
+  function endDrag(e) {
+    e.preventDefault();
+    dragging = false;
+    joystickStick.style.transform = `translate(0px, 0px)`;
+
+    // Clear joystick keys on release
+    keys["ArrowUp"] = false;
+    keys["ArrowDown"] = false;
+    keys["ArrowLeft"] = false;
+    keys["ArrowRight"] = false;
+  }
+
+  // Start and next level buttons
+  document.getElementById("startBtn").onclick = startGame;
+  document.getElementById("nextLevelBtn").onclick = nextLevel;
+
+  // Start the game loop
+  gameLoop();
+
+  function gameLoop() {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    drawField();
+    if(gameState === "running") {
+      movePlayer();
+      updateDefenders();
+      checkCollisions();
+    }
+    drawPlayers();
+    drawUI();
+    requestAnimationFrame(gameLoop);
+  }
+})();
+</script>
+</body>
+</html>
